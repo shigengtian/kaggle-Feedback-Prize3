@@ -1,0 +1,20 @@
+version: "3"
+
+services:
+  mmdet:
+    build: ./docker
+    container_name: ka
+    restart: always
+    working_dir: /feedback
+    volumes:
+      - /home/workstaion/workspace/ads/tt/feedback:/feedback
+    tty: true
+    shm_size: 50gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu]
+

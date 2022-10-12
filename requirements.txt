@@ -1,0 +1,7 @@
+iterative-stratification
+wandb
+sentencepiece
+pandas
+transformers
+tokenizers
+protobuf==3.20.*
