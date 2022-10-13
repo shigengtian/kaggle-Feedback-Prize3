@@ -3,11 +3,11 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp007-fb3-deberta-v3-large-adv/'
+OUTPUT_DIR = './exp008-fb3-deberta-v3-base-awp/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 # ====================================================
 # CFG
 # ====================================================
@@ -19,7 +19,7 @@ class CFG:
     apex=True
     print_freq=20
     num_workers=4
-    model="microsoft/deberta-v3-large"
+    model="microsoft/deberta-v3-base"
     gradient_checkpointing=True
     scheduler='cosine' # ['linear', 'cosine']
     batch_scheduler=True
@@ -321,8 +321,8 @@ class AWP:
         optimizer,
         criterion,
         adv_param="weight",
-        adv_lr=1,
-        adv_eps=0.2,
+        adv_lr=1e-4,
+        adv_eps=1e-2,
         start_epoch=0,
         adv_step=1,
         scaler=None
@@ -355,6 +355,7 @@ class AWP:
             self.scaler.scale(adv_loss).backward()
             
         self._restore()
+        return adv_loss
 
     def _attack_step(self):
         e = 1e-6
@@ -497,20 +498,13 @@ def timeSince(since, percent):
     return '%s (remain %s)' % (asMinutes(s), asMinutes(rs))
 
 
-def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
-    scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
-    awp = AWP(model,
-        optimizer,
-        scaler=scaler,
-        criterion=criterion,
-    # adv_lr=1,
-    #     adv_eps=0.2,
-        )
-        
+def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, awp,scaler):
+
     model.train()
     losses = AverageMeter()
     start = end = time.time()
     global_step = 0
+    
     for step, (inputs, labels) in enumerate(train_loader):
         inputs = collate(inputs)
         for k, v in inputs.items():
@@ -525,7 +519,7 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
         losses.update(loss.item(), batch_size)
         scaler.scale(loss).backward()
 
-        awp.attack_backward(inputs, labels, step) 
+        adv_loss = awp.attack_backward(inputs, labels, step)
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
         if (step + 1) % CFG.gradient_accumulation_steps == 0:
@@ -660,12 +654,20 @@ def train_loop(folds, fold):
     
     best_score = np.inf
 
+    scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
+
+    awp = AWP(model,
+    optimizer,
+    scaler=scaler,
+    criterion=criterion,
+    )
+
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
 
         # train
-        avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device)
+        avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, awp, scaler)
 
         # eval
         avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device)
