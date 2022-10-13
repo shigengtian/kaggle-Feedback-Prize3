@@ -3,7 +3,7 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp05-fb3-deberta-v3-large-adv/'
+OUTPUT_DIR = './exp05-fb3-deberta-v3-large-dropout/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -12,7 +12,7 @@ if not os.path.exists(OUTPUT_DIR):
 # CFG
 # ====================================================
 class CFG:
-    wandb=True
+    wandb=False
     competition='FB3'
     _wandb_kernel='shigengtian'
     debug=False
@@ -26,8 +26,8 @@ class CFG:
     num_cycles=0.5
     num_warmup_steps=0
     epochs=4
-    encoder_lr=2e-5
-    decoder_lr=2e-5
+    encoder_lr=1e-5
+    decoder_lr=1e-5
     min_lr=1e-6
     eps=1e-6
     betas=(0.9, 0.999)
@@ -41,8 +41,6 @@ class CFG:
     n_fold=5
     trn_fold=[0, 1, 2, 3, 4]
     train=True
-    awp_eps= 1e-2
-    awp_lr= 1e-4,
     
 if CFG.debug:
     CFG.epochs = 2
@@ -290,76 +288,6 @@ def collate(inputs):
     return inputs
 
 
-    
-class AWP:
-    def __init__(
-        self,
-        model,
-        optimizer,
-        adv_param="weight",
-        adv_lr=1,
-        adv_eps=0.2,
-        start_epoch=0,
-        adv_step=1,
-        scaler=None
-    ):
-        self.model = model
-        self.optimizer = optimizer
-        self.adv_param = adv_param
-        self.adv_lr = adv_lr
-        self.adv_eps = adv_eps
-        self.start_epoch = start_epoch
-        self.adv_step = adv_step
-        self.backup = {}
-        self.backup_eps = {}
-        self.scaler = scaler
-
-    def attack_backward(self, x, y, attention_mask,epoch):
-        if (self.adv_lr == 0) or (epoch < self.start_epoch):
-            return None
-
-        self._save() 
-        for i in range(self.adv_step):
-            self._attack_step() 
-            with torch.cuda.amp.autocast():
-                adv_loss, tr_logits = self.model(input_ids=x, attention_mask=attention_mask, labels=y)
-                adv_loss = adv_loss.mean()
-            self.optimizer.zero_grad()
-            self.scaler.scale(adv_loss).backward()
-            
-        self._restore()
-
-    def _attack_step(self):
-        e = 1e-6
-        for name, param in self.model.named_parameters():
-            if param.requires_grad and param.grad is not None and self.adv_param in name:
-                norm1 = torch.norm(param.grad)
-                norm2 = torch.norm(param.data.detach())
-                if norm1 != 0 and not torch.isnan(norm1):
-                    r_at = self.adv_lr * param.grad / (norm1 + e) * (norm2 + e)
-                    param.data.add_(r_at)
-                    param.data = torch.min(
-                        torch.max(param.data, self.backup_eps[name][0]), self.backup_eps[name][1]
-                    )
-                # param.data.clamp_(*self.backup_eps[name])
-
-    def _save(self):
-        for name, param in self.model.named_parameters():
-            if param.requires_grad and param.grad is not None and self.adv_param in name:
-                if name not in self.backup:
-                    self.backup[name] = param.data.clone()
-                    grad_eps = self.adv_eps * param.abs().detach()
-                    self.backup_eps[name] = (
-                        self.backup[name] - grad_eps,
-                        self.backup[name] + grad_eps,
-                    )
-
-    def _restore(self,):
-        for name, param in self.model.named_parameters():
-            if name in self.backup:
-                param.data = self.backup[name]
-        self.backup = {}
-        self.backup_eps = {}
 # ====================================================
 # Model
 # ====================================================
@@ -375,72 +303,6 @@ class MeanPooling(nn.Module):
         mean_embeddings = sum_embeddings / sum_mask
         return mean_embeddings
     
-
-# class CustomModel(nn.Module):
-#     def __init__(self, cfg, config_path=None, pretrained=False):
-#         super().__init__()
-#         self.cfg = cfg
-#         if config_path is None:
-#             self.config = AutoConfig.from_pretrained(cfg.model, output_hidden_states=True)
-#             self.config.hidden_dropout = 0.
-#             self.config.hidden_dropout_prob = 0.
-#             self.config.attention_dropout = 0.
-#             self.config.attention_probs_dropout_prob = 0.
-#             LOGGER.info(self.config)
-#         else:
-#             self.config = torch.load(config_path)
-#         if pretrained:
-#             self.model = AutoModel.from_pretrained(cfg.model, config=self.config)
-#         else:
-#             self.model = AutoModel(self.config)
-#         if self.cfg.gradient_checkpointing:
-#             self.model.gradient_checkpointing_enable()
-
-#         self.dropout = nn.Dropout(0.1)
-#         self.dropout1 = nn.Dropout(0.1)
-#         self.dropout2 = nn.Dropout(0.2)
-#         self.dropout3 = nn.Dropout(0.3)
-#         self.dropout4 = nn.Dropout(0.4)
-#         self.dropout5 = nn.Dropout(0.5)
-
-#         self.pool = MeanPooling()
-#         self.fc = nn.Linear(self.config.hidden_size, 6)
-#         self._init_weights(self.fc)
-        
-#     def _init_weights(self, module):
-#         if isinstance(module, nn.Linear):
-#             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-#             if module.bias is not None:
-#                 module.bias.data.zero_()
-#         elif isinstance(module, nn.Embedding):
-#             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-#             if module.padding_idx is not None:
-#                 module.weight.data[module.padding_idx].zero_()
-#         elif isinstance(module, nn.LayerNorm):
-#             module.bias.data.zero_()
-#             module.weight.data.fill_(1.0)
-        
-#     def feature(self, inputs):
-#           outputs = self.model(**inputs)
-#           last_hidden_states = outputs[0]
-#           feature = self.pool(last_hidden_states, inputs['attention_mask'])
-#           return feature
-
-#     def forward(self, inputs):
-#         feature = self.feature(inputs)
-
-#         logits1 = self.fc(self.dropout1(feature))
-#         logits2 = self.fc(self.dropout2(feature))
-#         logits3 = self.fc(self.dropout3(feature))
-#         logits4 = self.fc(self.dropout4(feature))
-#         logits5 = self.fc(self.dropout5(feature))
-
-#         logits = (logits1 + logits2 + logits3 + logits4 + logits5) / 5
-
-        
-#         # output = self.fc(logits)
-#         return logits
-
 
 class CustomModel(nn.Module):
     def __init__(self, cfg, config_path=None, pretrained=False):
@@ -461,6 +323,14 @@ class CustomModel(nn.Module):
             self.model = AutoModel(self.config)
         if self.cfg.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
+
+        self.dropout = nn.Dropout(0.1)
+        self.dropout1 = nn.Dropout(0.1)
+        self.dropout2 = nn.Dropout(0.2)
+        self.dropout3 = nn.Dropout(0.3)
+        self.dropout4 = nn.Dropout(0.4)
+        self.dropout5 = nn.Dropout(0.5)
+
         self.pool = MeanPooling()
         self.fc = nn.Linear(self.config.hidden_size, 6)
         self._init_weights(self.fc)
@@ -479,15 +349,25 @@ class CustomModel(nn.Module):
             module.weight.data.fill_(1.0)
         
     def feature(self, inputs):
-        outputs = self.model(**inputs)
-        last_hidden_states = outputs[0]
-        feature = self.pool(last_hidden_states, inputs['attention_mask'])
-        return feature
+          outputs = self.model(**inputs)
+          last_hidden_states = outputs[0]
+          feature = self.pool(last_hidden_states, inputs['attention_mask'])
+          return feature
 
     def forward(self, inputs):
         feature = self.feature(inputs)
-        output = self.fc(feature)
-        return output
+
+        logits1 = self.fc(self.dropout1(feature))
+        logits2 = self.fc(self.dropout2(feature))
+        logits3 = self.fc(self.dropout3(feature))
+        logits4 = self.fc(self.dropout4(feature))
+        logits5 = self.fc(self.dropout5(feature))
+
+        logits = (logits1 + logits2 + logits3 + logits4 + logits5) / 5
+
+        
+        # output = self.fc(logits)
+        return logits
 
 
 # # Loss
@@ -550,13 +430,6 @@ def timeSince(since, percent):
 
 
 def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
-    awp = AWP(model,
-        optimizer,
-        adv_lr=CFG.awp_lr,
-        adv_eps=CFG.awp_eps,
-        start_epoch=2,
-        scaler=scaler
-        )
     model.train()
     scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
     losses = AverageMeter()
@@ -575,9 +448,6 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
             loss = loss / CFG.gradient_accumulation_steps
         losses.update(loss.item(), batch_size)
         scaler.scale(loss).backward()
-
-        awp.attack_backward(inputs['input_ids'], labels, inputs['attention_mask'], step) 
-
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
         if (step + 1) % CFG.gradient_accumulation_steps == 0:
             scaler.step(optimizer)
