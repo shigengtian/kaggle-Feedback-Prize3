@@ -3,16 +3,18 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp009-fb3-deberta-v3-large-cohesion/'
+OUTPUT_DIR = './exp009-fb3-deberta-v3-large-syntax/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
+
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 # ====================================================
 # CFG
 # ====================================================
 class CFG:
-    wandb=True
+    wandb=False
     competition='FB3'
     _wandb_kernel='shigengtian'
     debug=False
@@ -36,7 +38,7 @@ class CFG:
     weight_decay=0.01
     gradient_accumulation_steps=1
     max_grad_norm=1000
-    target_cols=['cohesion']
+    target_cols=['syntax']
     # target_cols=['cohesion', 'syntax', 'vocabulary', 'phraseology', 'grammar', 'conventions']
     seed=42
     n_fold=5
@@ -202,7 +204,8 @@ submission = pd.read_csv('./feedback-prize-english-language-learning/sample_subm
 # CV split
 # ====================================================
 Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
+target_cols=['cohesion', 'syntax', 'vocabulary', 'phraseology', 'grammar', 'conventions']
+for n, (train_index, val_index) in enumerate(Fold.split(train, train[target_cols])):
     train.loc[val_index, 'fold'] = int(n)
 train['fold'] = train['fold'].astype(int)
 # display(train.groupby('fold').size())
@@ -243,7 +246,7 @@ tk0 = tqdm(train['full_text'].fillna("").values, total=len(train))
 for text in tk0:
     length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
     lengths.append(length)
-CFG.max_len = max(lengths) + 3 # cls & sep & sep
+CFG.max_len = max(lengths) + 2 # cls & sep & sep
 LOGGER.info(f"max_len: {CFG.max_len}")
 
 
@@ -315,7 +318,7 @@ class CustomModel(nn.Module):
             self.config.hidden_dropout_prob = 0.
             self.config.attention_dropout = 0.
             self.config.attention_probs_dropout_prob = 0.
-            LOGGER.info(self.config)
+            # LOGGER.info(self.config)
         else:
             self.config = torch.load(config_path)
         if pretrained:
