@@ -3,7 +3,7 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp010-fb3-deberta-v3-large-vocabulary/'
+OUTPUT_DIR = './exp011-fb3-deberta-v3-base-vocabulary/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -21,7 +21,7 @@ class CFG:
     apex=True
     print_freq=20
     num_workers=4
-    model="microsoft/deberta-v3-large"
+    model="microsoft/deberta-v3-base"
     gradient_checkpointing=True
     scheduler='cosine' # ['linear', 'cosine']
     batch_scheduler=True

@@ -3,7 +3,7 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp010-fb3-deberta-v3-large-vocabulary/'
+OUTPUT_DIR = './exp012-fb3-deberta-v3-base-grammar/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -21,15 +21,15 @@ class CFG:
     apex=True
     print_freq=20
     num_workers=4
-    model="microsoft/deberta-v3-large"
+    model="microsoft/deberta-v3-base"
     gradient_checkpointing=True
     scheduler='cosine' # ['linear', 'cosine']
     batch_scheduler=True
     num_cycles=0.5
     num_warmup_steps=0
     epochs=4
-    encoder_lr=2e-5
-    decoder_lr=2e-5
+    encoder_lr=1e-5
+    decoder_lr=1e-5
     min_lr=1e-6
     eps=1e-6
     betas=(0.9, 0.999)
@@ -38,7 +38,7 @@ class CFG:
     weight_decay=0.01
     gradient_accumulation_steps=1
     max_grad_norm=1000
-    target_cols=['vocabulary']
+    target_cols=['grammar']
     # target_cols=['cohesion', 'syntax', 'vocabulary', 'phraseology', 'grammar', 'conventions']
     seed=42
     n_fold=5

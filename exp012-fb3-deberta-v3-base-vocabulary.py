@@ -3,7 +3,7 @@
 # ====================================================
 import os
 
-OUTPUT_DIR = './exp010-fb3-deberta-v3-large-vocabulary/'
+OUTPUT_DIR = './exp012-fb3-deberta-v3-base-vocabulary/'
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
@@ -28,8 +28,8 @@ class CFG:
     num_cycles=0.5
     num_warmup_steps=0
     epochs=4
-    encoder_lr=2e-5
-    decoder_lr=2e-5
+    encoder_lr=1e-5
+    decoder_lr=1e-5
     min_lr=1e-6
     eps=1e-6
     betas=(0.9, 0.999)
