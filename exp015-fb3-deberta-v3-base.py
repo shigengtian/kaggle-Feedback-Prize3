@@ -1,12 +1,32 @@
-# ====================================================
-# Directory settings
-# ====================================================
+
 import os
+import gc
+import time
+import warnings
+import argparse
+warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = './exp014-fb3-deberta-v3-base/'
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
+import numpy as np
+import pandas as pd
+from tqdm.auto import tqdm
+from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+
+import torch
+import torch.nn as nn
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset
+
+import tokenizers
+import transformers
+print(f"tokenizers.__version__: {tokenizers.__version__}")
+print(f"transformers.__version__: {transformers.__version__}")
+from transformers import AutoTokenizer, AutoModel, AutoConfig
+from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
+from utils import *
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # ====================================================
 # CFG
@@ -42,26 +62,10 @@ class CFG:
     trn_fold=[0, 1, 2, 3, 4]
     train=True
     
-if CFG.debug:
-    CFG.epochs = 2
-    CFG.trn_fold = [0]
-
 
 if CFG.wandb:
     
     import wandb
-
-    # try:
-    #     from kaggle_secrets import UserSecretsClient
-    #     user_secrets = UserSecretsClient()
-    #     secret_value_0 = user_secrets.get_secret("wandb_api")
-    #     wandb.login(key=secret_value_0)
-    #     anony = None
-    # except:
-    #     anony = "must"
-    #     print('If you want to use your W&B account, go to Add-ons -> Secrets and provide your W&B access token. Use the Label name as wandb_api. \nGet your W&B access token from here: https://wandb.ai/authorize')
-
-
     def class2dict(f):
         return dict((name, getattr(f, name)) for name in dir(f) if not name.startswith('__'))
 
@@ -71,183 +75,6 @@ if CFG.wandb:
                      group=CFG.model,
                      job_type="train",
                      )
-
-
-# ====================================================
-# Library
-# ====================================================
-import os
-import gc
-import re
-import ast
-import sys
-import copy
-import json
-import time
-import math
-import string
-import pickle
-import random
-import joblib
-import itertools
-import warnings
-warnings.filterwarnings("ignore")
-
-import scipy as sp
-import numpy as np
-import pandas as pd
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
-from tqdm.auto import tqdm
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
-
-# os.system('pip install iterative-stratification==0.1.7')
-from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
-
-import torch
-import torch.nn as nn
-from torch.nn import Parameter
-import torch.nn.functional as F
-from torch.optim import Adam, SGD, AdamW
-from torch.utils.data import DataLoader, Dataset
-
-# os.system('pip uninstall -y transformers')
-# os.system('pip uninstall -y tokenizers')
-# os.system('python -m pip install --no-index --find-links=../input/fb3-pip-wheels transformers')
-# os.system('python -m pip install --no-index --find-links=../input/fb3-pip-wheels tokenizers')
-import tokenizers
-import transformers
-print(f"tokenizers.__version__: {tokenizers.__version__}")
-print(f"transformers.__version__: {transformers.__version__}")
-from transformers import AutoTokenizer, AutoModel, AutoConfig
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
-
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-
-def MCRMSE(y_trues, y_preds):
-    scores = []
-    idxes = y_trues.shape[1]
-    for i in range(idxes):
-        y_true = y_trues[:,i]
-        y_pred = y_preds[:,i]
-        score = mean_squared_error(y_true, y_pred, squared=False) # RMSE
-        scores.append(score)
-    mcrmse_score = np.mean(scores)
-    return mcrmse_score, scores
-
-
-def get_score(y_trues, y_preds):
-    mcrmse_score, scores = MCRMSE(y_trues, y_preds)
-    return mcrmse_score, scores
-
-
-def get_logger(filename=OUTPUT_DIR+'train'):
-    from logging import getLogger, INFO, StreamHandler, FileHandler, Formatter
-    logger = getLogger(__name__)
-    logger.setLevel(INFO)
-    handler1 = StreamHandler()
-    handler1.setFormatter(Formatter("%(message)s"))
-    handler2 = FileHandler(filename=f"{filename}.log")
-    handler2.setFormatter(Formatter("%(message)s"))
-    logger.addHandler(handler1)
-    logger.addHandler(handler2)
-    return logger
-
-LOGGER = get_logger()
-
-
-def seed_everything(seed=42):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    
-seed_everything(seed=42)
-
-
-# # Data Loading
-
-# In[6]:
-
-
-# ====================================================
-# Data Loading
-# ====================================================
-train = pd.read_csv('./feedback-prize-english-language-learning/train.csv')
-test = pd.read_csv('./feedback-prize-english-language-learning/test.csv')
-submission = pd.read_csv('./feedback-prize-english-language-learning/sample_submission.csv')
-
-# print(f"train.shape: {train.shape}")
-# display(train.head())
-# print(f"test.shape: {test.shape}")
-# display(test.head())
-# print(f"submission.shape: {submission.shape}")
-# display(submission.head())
-
-
-# # CV split
-
-# In[7]:
-
-
-# ====================================================
-# CV split
-# ====================================================
-Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
-    train.loc[val_index, 'fold'] = int(n)
-train['fold'] = train['fold'].astype(int)
-# display(train.groupby('fold').size())
-
-
-# In[8]:
-
-
-if CFG.debug:
-    # display(train.groupby('fold').size())
-    train = train.sample(n=1000, random_state=0).reset_index(drop=True)
-    # display(train.groupby('fold').size())
-
-
-# # tokenizer
-
-# In[9]:
-
-
-# ====================================================
-# tokenizer
-# ====================================================
-tokenizer = AutoTokenizer.from_pretrained(CFG.model)
-tokenizer.save_pretrained(OUTPUT_DIR+'tokenizer/')
-CFG.tokenizer = tokenizer
-
-
-# # Dataset
-
-# In[10]:
-
-
-# ====================================================
-# Define max_len
-# ====================================================
-lengths = []
-tk0 = tqdm(train['full_text'].fillna("").values, total=len(train))
-for text in tk0:
-    length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
-    lengths.append(length)
-CFG.max_len = max(lengths) + 3 # cls & sep & sep
-LOGGER.info(f"max_len: {CFG.max_len}")
-
-
-# In[11]:
-
 
 # ====================================================
 # Dataset
@@ -314,7 +141,6 @@ class CustomModel(nn.Module):
             self.config.hidden_dropout_prob = 0.
             self.config.attention_dropout = 0.
             self.config.attention_probs_dropout_prob = 0.
-            # LOGGER.info(self.config)
         else:
             self.config = torch.load(config_path)
         if pretrained:
@@ -352,8 +178,6 @@ class CustomModel(nn.Module):
         return output
 
 
-# # Loss
-
 # ====================================================
 # Loss
 # ====================================================
@@ -374,41 +198,6 @@ class RMSELoss(nn.Module):
             loss = loss.mean()
         return loss
 
-
-# # Helpler functions
-# ====================================================
-# Helper functions
-# ====================================================
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-def asMinutes(s):
-    m = math.floor(s / 60)
-    s -= m * 60
-    return '%dm %ds' % (m, s)
-
-
-def timeSince(since, percent):
-    now = time.time()
-    s = now - since
-    es = s / (percent)
-    rs = es - s
-    return '%s (remain %s)' % (asMinutes(s), asMinutes(rs))
 
 
 def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
@@ -486,7 +275,6 @@ def valid_fn(valid_loader, model, criterion, device):
     return losses.avg, predictions
 
 
-# # train loop
 # ====================================================
 # train loop
 # ====================================================
@@ -603,8 +391,73 @@ def train_loop(folds, fold):
     return valid_folds
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fold", type=int, required=True)
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--lr", type=float, required=True)
+    parser.add_argument("--output", type=str, default="../model", required=False)
+    parser.add_argument("--input", type=str, default="./", required=False)
+    parser.add_argument("--max_len", type=int, default=1024, required=False)
+    parser.add_argument("--batch_size", type=int, default=8, required=False)
+    parser.add_argument("--output_path", type=str, default=8, required=False)
+    # parser.add_argument("--valid_batch_size", type=int, default=8, required=False)
+    # parser.add_argument("--epochs", type=int, default=20, required=False)
+    # parser.add_argument("--accumulation_steps", type=int, default=1, required=False)
+    # parser.add_argument("--user_fast", type=str, default="False", required=False)
+
+    return parser.parse_args()
+
 if __name__ == '__main__':
+    seed_everything(seed=42)
+    args = parse_args()
     
+
+    OUTPUT_DIR = args.output_path
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+
+    LOGGER = get_logger(OUTPUT_DIR)
+
+
+    # ====================================================
+    # Data Loading
+    # ====================================================
+    train = pd.read_csv('./feedback-prize-english-language-learning/train.csv')
+    test = pd.read_csv('./feedback-prize-english-language-learning/test.csv')
+    submission = pd.read_csv('./feedback-prize-english-language-learning/sample_submission.csv')
+
+
+    # ====================================================
+    # CV split
+    # ====================================================
+    Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
+    for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
+        train.loc[val_index, 'fold'] = int(n)
+    train['fold'] = train['fold'].astype(int)
+
+
+    # ====================================================
+    # tokenizer
+    # ====================================================
+    tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+    tokenizer.save_pretrained(OUTPUT_DIR+'tokenizer/')
+    CFG.tokenizer = tokenizer
+
+
+    # ====================================================
+    # Define max_len
+    # ====================================================
+    lengths = []
+    tk0 = tqdm(train['full_text'].fillna("").values, total=len(train))
+    for text in tk0:
+        length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
+        lengths.append(length)
+    CFG.max_len = max(lengths) + 3 # cls & sep & sep
+
+    # ====================================================
+    # Start train
+    # ====================================================
     def get_result(oof_df):
         labels = oof_df[CFG.target_cols].values
         preds = oof_df[[f"pred_{c}" for c in CFG.target_cols]].values

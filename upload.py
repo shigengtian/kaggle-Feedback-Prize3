@@ -7,7 +7,7 @@ import json
 #     Exp = "exp01"
 #     OUTPUT_DIR = "exp01"
 
-exp_no = "exp001"
+exp_no = "exp012-fb3-deberta-v3-base-vocabulary"
 
 user_name="shigengtian"
 def dataset_create_new(dataset_name, upload_dir):
