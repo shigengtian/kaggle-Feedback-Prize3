@@ -1,13 +1,34 @@
-# ====================================================
-# Directory settings
-# ====================================================
+
 import os
+import gc
+import time
+import warnings
+import argparse
+warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = './exp008-fb3-deberta-v3-large-awp/'
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
+import numpy as np
+import pandas as pd
+from tqdm.auto import tqdm
+from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+
+import torch
+import torch.nn as nn
+from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset
+
+import tokenizers
+import transformers
+print(f"tokenizers.__version__: {tokenizers.__version__}")
+print(f"transformers.__version__: {transformers.__version__}")
+from transformers import AutoTokenizer, AutoModel, AutoConfig
+from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
+from utils import *
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 # ====================================================
 # CFG
 # ====================================================
@@ -19,19 +40,19 @@ class CFG:
     apex=True
     print_freq=20
     num_workers=4
-    model="microsoft/deberta-v3-large"
+    model="microsoft/deberta-v3-base"
     gradient_checkpointing=True
     scheduler='cosine' # ['linear', 'cosine']
     batch_scheduler=True
     num_cycles=0.5
     num_warmup_steps=0
     epochs=4
-    encoder_lr=2e-5
-    decoder_lr=2e-5
+    encoder_lr=1e-5
+    decoder_lr=1e-5
     min_lr=1e-6
     eps=1e-6
     betas=(0.9, 0.999)
-    batch_size=6
+    batch_size=8
     max_len=512
     weight_decay=0.01
     gradient_accumulation_steps=1
@@ -41,157 +62,20 @@ class CFG:
     n_fold=5
     trn_fold=[0, 1, 2, 3, 4]
     train=True
-    awp_eps= 1e-2
-    awp_lr= 1e-4,
     
-if CFG.debug:
-    CFG.epochs = 2
-    CFG.trn_fold = [0]
 
-# ====================================================
-# Library
-# ====================================================
-import os
-import gc
-import re
-import ast
-import sys
-import copy
-import json
-import time
-import math
-import string
-import pickle
-import random
-import joblib
-import itertools
-import warnings
-warnings.filterwarnings("ignore")
-
-import scipy as sp
-import numpy as np
-import pandas as pd
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
-from tqdm.auto import tqdm
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
-
-from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
-
-import torch
-import torch.nn as nn
-from torch.nn import Parameter
-import torch.nn.functional as F
-from torch.optim import Adam, SGD, AdamW
-from torch.utils.data import DataLoader, Dataset
-
-import tokenizers
-import transformers
-print(f"tokenizers.__version__: {tokenizers.__version__}")
-print(f"transformers.__version__: {transformers.__version__}")
-from transformers import AutoTokenizer, AutoModel, AutoConfig
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
-
-# from adversarial import AWP
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-
-def MCRMSE(y_trues, y_preds):
-    scores = []
-    idxes = y_trues.shape[1]
-    for i in range(idxes):
-        y_true = y_trues[:,i]
-        y_pred = y_preds[:,i]
-        score = mean_squared_error(y_true, y_pred, squared=False) # RMSE
-        scores.append(score)
-    mcrmse_score = np.mean(scores)
-    return mcrmse_score, scores
-
-
-def get_score(y_trues, y_preds):
-    mcrmse_score, scores = MCRMSE(y_trues, y_preds)
-    return mcrmse_score, scores
-
-
-def get_logger(filename=OUTPUT_DIR+'train'):
-    from logging import getLogger, INFO, StreamHandler, FileHandler, Formatter
-    logger = getLogger(__name__)
-    logger.setLevel(INFO)
-    handler1 = StreamHandler()
-    handler1.setFormatter(Formatter("%(message)s"))
-    handler2 = FileHandler(filename=f"{filename}.log")
-    handler2.setFormatter(Formatter("%(message)s"))
-    logger.addHandler(handler1)
-    logger.addHandler(handler2)
-    return logger
-
-LOGGER = get_logger()
-
-
-def seed_everything(seed=42):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
+if CFG.wandb:
     
-seed_everything(seed=42)
+    import wandb
+    def class2dict(f):
+        return dict((name, getattr(f, name)) for name in dir(f) if not name.startswith('__'))
 
-
-# ====================================================
-# Data Loading
-# ====================================================
-train = pd.read_csv('./feedback-prize-english-language-learning/train.csv')
-test = pd.read_csv('./feedback-prize-english-language-learning/test.csv')
-submission = pd.read_csv('./feedback-prize-english-language-learning/sample_submission.csv')
-
-# ====================================================
-# CV split
-# ====================================================
-Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
-    train.loc[val_index, 'fold'] = int(n)
-train['fold'] = train['fold'].astype(int)
-
-
-if CFG.debug:
-    # display(train.groupby('fold').size())
-    train = train.sample(n=1000, random_state=0).reset_index(drop=True)
-    # display(train.groupby('fold').size())
-
-
-# ====================================================
-# tokenizer
-# ====================================================
-tokenizer = AutoTokenizer.from_pretrained(CFG.model)
-tokenizer.save_pretrained(OUTPUT_DIR+'tokenizer/')
-CFG.tokenizer = tokenizer
-
-
-# # Dataset
-
-# In[10]:
-
-
-# ====================================================
-# Define max_len
-# ====================================================
-lengths = []
-tk0 = tqdm(train['full_text'].fillna("").values, total=len(train))
-for text in tk0:
-    length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
-    lengths.append(length)
-CFG.max_len = max(lengths) + 2 # cls & sep & sep
-LOGGER.info(f"max_len: {CFG.max_len}")
-
-
-# In[11]:
-
+    run = wandb.init(project='FB3-Public', 
+                     name=CFG.model,
+                     config=class2dict(CFG),
+                     group=CFG.model,
+                     job_type="train",
+                     )
 
 # ====================================================
 # Dataset
@@ -266,14 +150,6 @@ class MeanPooling(nn.Module):
 #             self.model = AutoModel(self.config)
 #         if self.cfg.gradient_checkpointing:
 #             self.model.gradient_checkpointing_enable()
-
-#         self.dropout = nn.Dropout(0.1)
-#         self.dropout1 = nn.Dropout(0.1)
-#         self.dropout2 = nn.Dropout(0.2)
-#         self.dropout3 = nn.Dropout(0.3)
-#         self.dropout4 = nn.Dropout(0.4)
-#         self.dropout5 = nn.Dropout(0.5)
-
 #         self.pool = MeanPooling()
 #         self.fc = nn.Linear(self.config.hidden_size, 6)
 #         self._init_weights(self.fc)
@@ -292,155 +168,65 @@ class MeanPooling(nn.Module):
 #             module.weight.data.fill_(1.0)
         
 #     def feature(self, inputs):
-#           outputs = self.model(**inputs)
-#           last_hidden_states = outputs[0]
-#           feature = self.pool(last_hidden_states, inputs['attention_mask'])
-#           return feature
+#         outputs = self.model(**inputs)
+#         last_hidden_states = outputs[0]
+#         feature = self.pool(last_hidden_states, inputs['attention_mask'])
+#         return feature
 
 #     def forward(self, inputs):
 #         feature = self.feature(inputs)
-
-#         logits1 = self.fc(self.dropout1(feature))
-#         logits2 = self.fc(self.dropout2(feature))
-#         logits3 = self.fc(self.dropout3(feature))
-#         logits4 = self.fc(self.dropout4(feature))
-#         logits5 = self.fc(self.dropout5(feature))
-
-#         logits = (logits1 + logits2 + logits3 + logits4 + logits5) / 5
-
-        
-#         # output = self.fc(logits)
-#         return logits
-
-
-
-class AWP:
-    def __init__(
-        self,
-        model,
-        optimizer,
-        criterion,
-        adv_param="weight",
-        adv_lr=1e-4,
-        adv_eps=1e-2,
-        start_epoch=0,
-        adv_step=1,
-        scaler=None
-    ):
-        self.model = model
-        self.optimizer = optimizer
-        self.adv_param = adv_param
-        self.adv_lr = adv_lr
-        self.adv_eps = adv_eps
-        self.start_epoch = start_epoch
-        self.adv_step = adv_step
-        self.backup = {}
-        self.backup_eps = {}
-        self.scaler = scaler
-        self.criterion = criterion
-
-    def attack_backward(self, inputs, labels, epoch):
-        if (self.adv_lr == 0) or (epoch < self.start_epoch):
-            return None
-
-        self._save()
-        for i in range(self.adv_step):
-            self._attack_step()
-            with torch.cuda.amp.autocast():
-                y_preds = self.model(inputs)
-                adv_loss = self.criterion(y_preds, labels)
-                # adv_loss, tr_logits = self.model(input_ids=x, attention_mask=attention_mask, labels=y)
-            
-            self.optimizer.zero_grad()
-            self.scaler.scale(adv_loss).backward()
-            
-        self._restore()
-        return adv_loss
-
-    def _attack_step(self):
-        e = 1e-6
-        for name, param in self.model.named_parameters():
-            if param.requires_grad and param.grad is not None and self.adv_param in name:
-                norm1 = torch.norm(param.grad)
-                norm2 = torch.norm(param.data.detach())
-                if norm1 != 0 and not torch.isnan(norm1):
-                    r_at = self.adv_lr * param.grad / (norm1 + e) * (norm2 + e)
-                    param.data.add_(r_at)
-                    param.data = torch.min(
-                        torch.max(param.data, self.backup_eps[name][0]), self.backup_eps[name][1]
-                    )
-                # param.data.clamp_(*self.backup_eps[name])
-
-    def _save(self):
-        for name, param in self.model.named_parameters():
-            if param.requires_grad and param.grad is not None and self.adv_param in name:
-                # 保存原始参数
-                if name not in self.backup:
-                    self.backup[name] = param.data.clone()
-                    grad_eps = self.adv_eps * param.abs().detach()
-                    self.backup_eps[name] = (
-                        self.backup[name] - grad_eps,
-                        self.backup[name] + grad_eps,
-                    )
-
-    def _restore(self,):
-        for name, param in self.model.named_parameters():
-            if name in self.backup:
-                param.data = self.backup[name]
-        self.backup = {}
-        self.backup_eps = {}
-
+#         output = self.fc(feature)
+#         return output
 
 
 class CustomModel(nn.Module):
     def __init__(self, cfg, config_path=None, pretrained=False):
         super().__init__()
+        #self.model_name = model_name
+        self.num_labels = 6
+
         self.cfg = cfg
-        if config_path is None:
-            self.config = AutoConfig.from_pretrained(cfg.model, output_hidden_states=True)
-            self.config.hidden_dropout = 0.
-            self.config.hidden_dropout_prob = 0.
-            self.config.attention_dropout = 0.
-            self.config.attention_probs_dropout_prob = 0.
-        else:
-            self.config = torch.load(config_path)
-        if pretrained:
-            self.model = AutoModel.from_pretrained(cfg.model, config=self.config)
-        else:
-            self.model = AutoModel(self.config)
-        if self.cfg.gradient_checkpointing:
-            self.model.gradient_checkpointing_enable()
-        self.pool = MeanPooling()
-        self.fc = nn.Linear(self.config.hidden_size, 6)
-        self._init_weights(self.fc)
-        
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-        
-    def feature(self, inputs):
-        outputs = self.model(**inputs)
-        last_hidden_states = outputs[0]
-        feature = self.pool(last_hidden_states, inputs['attention_mask'])
-        return feature
+        hidden_dropout_prob: float = 0.0
+        self.config = AutoConfig.from_pretrained(cfg.model)
 
-    def forward(self, inputs):
-        feature = self.feature(inputs)
-        output = self.fc(feature)
-        return output
+        self.config.update(
+            {
+                "output_hidden_states": True,
+                "hidden_dropout_prob": hidden_dropout_prob,
+                "add_pooling_layer": False,
+                "num_labels": self.num_labels,
+            }
+        )
+        # print(self.config)
+        self.model = AutoModel.from_pretrained(self.cfg.model, config=self.config)
+        # self.model = AutoModel.from_pretrained(cfg.model, config=self.config)
+        self.dropout = nn.Dropout(self.config.hidden_dropout_prob)
+        self.dropout1 = nn.Dropout(0.1)
+        self.dropout2 = nn.Dropout(0.2)
+        self.dropout3 = nn.Dropout(0.3)
+        self.dropout4 = nn.Dropout(0.4)
+        self.dropout5 = nn.Dropout(0.5)
+        self.output = nn.Linear(self.config.hidden_size, self.num_labels)
 
+    # def feature(self, inputs):
+    #     outputs = self.model(**inputs)
+    #     # last_hidden_states = outputs[0]
+    #     # feature = self.pool(last_hidden_states, inputs['attention_mask'])
+    #     feature = outputs
+    #     return feature
 
-# # Loss
-
+    def forward(self, sample):
+        # print(sample)
+        transformer_out = self.model(**sample)
+        sequence_output = transformer_out.last_hidden_state[:, 0, :]
+        sequence_output = self.dropout(sequence_output)
+        logits1 = self.output(self.dropout1(sequence_output))
+        logits2 = self.output(self.dropout2(sequence_output))
+        logits3 = self.output(self.dropout3(sequence_output))
+        logits4 = self.output(self.dropout4(sequence_output))
+        logits5 = self.output(self.dropout5(sequence_output))
+        logits = (logits1 + logits2 + logits3 + logits4 + logits5) / 5
+        return logits
 # ====================================================
 # Loss
 # ====================================================
@@ -462,49 +248,13 @@ class RMSELoss(nn.Module):
         return loss
 
 
-# # Helpler functions
-# ====================================================
-# Helper functions
-# ====================================================
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
 
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-def asMinutes(s):
-    m = math.floor(s / 60)
-    s -= m * 60
-    return '%dm %ds' % (m, s)
-
-
-def timeSince(since, percent):
-    now = time.time()
-    s = now - since
-    es = s / (percent)
-    rs = es - s
-    return '%s (remain %s)' % (asMinutes(s), asMinutes(rs))
-
-
-def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, awp,scaler):
-
+def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device):
     model.train()
+    scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
     losses = AverageMeter()
     start = end = time.time()
     global_step = 0
-    
     for step, (inputs, labels) in enumerate(train_loader):
         inputs = collate(inputs)
         for k, v in inputs.items():
@@ -518,9 +268,6 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
             loss = loss / CFG.gradient_accumulation_steps
         losses.update(loss.item(), batch_size)
         scaler.scale(loss).backward()
-
-        adv_loss = awp.attack_backward(inputs, labels, step)
-
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.max_grad_norm)
         if (step + 1) % CFG.gradient_accumulation_steps == 0:
             scaler.step(optimizer)
@@ -577,7 +324,6 @@ def valid_fn(valid_loader, model, criterion, device):
     return losses.avg, predictions
 
 
-# # train loop
 # ====================================================
 # train loop
 # ====================================================
@@ -654,20 +400,12 @@ def train_loop(folds, fold):
     
     best_score = np.inf
 
-    scaler = torch.cuda.amp.GradScaler(enabled=CFG.apex)
-
-    awp = AWP(model,
-    optimizer,
-    scaler=scaler,
-    criterion=criterion,
-    )
-
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
 
         # train
-        avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device, awp, scaler)
+        avg_loss = train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
         avg_val_loss, predictions = valid_fn(valid_loader, model, criterion, device)
@@ -702,8 +440,70 @@ def train_loop(folds, fold):
     return valid_folds
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--lr", type=float, required=True)
+    parser.add_argument("--max_len", type=int, default=1024, required=False)
+    parser.add_argument("--batch_size", type=int, default=8, required=False)
+    parser.add_argument("--output_path", type=str, required=True)
+
+    return parser.parse_args()
+
 if __name__ == '__main__':
+
+    seed_everything(seed=42)
+    args = parse_args()
+    CFG.model= args.model
+    CFG.lr = args.lr
     
+    
+
+    OUTPUT_DIR = args.output_path
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+
+    LOGGER = get_logger(OUTPUT_DIR)
+
+
+    # ====================================================
+    # Data Loading
+    # ====================================================
+    train = pd.read_csv('./feedback-prize-english-language-learning/train.csv')
+    test = pd.read_csv('./feedback-prize-english-language-learning/test.csv')
+    submission = pd.read_csv('./feedback-prize-english-language-learning/sample_submission.csv')
+
+
+    # ====================================================
+    # CV split
+    # ====================================================
+    Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
+    for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
+        train.loc[val_index, 'fold'] = int(n)
+    train['fold'] = train['fold'].astype(int)
+
+
+    # ====================================================
+    # tokenizer
+    # ====================================================
+    tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+    tokenizer.save_pretrained(OUTPUT_DIR+'tokenizer/')
+    CFG.tokenizer = tokenizer
+
+
+    # ====================================================
+    # Define max_len
+    # ====================================================
+    lengths = []
+    tk0 = tqdm(train['full_text'].fillna("").values, total=len(train))
+    for text in tk0:
+        length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
+        lengths.append(length)
+    CFG.max_len = max(lengths) + 3 # cls & sep & sep
+
+    # ====================================================
+    # Start train
+    # ====================================================
     def get_result(oof_df):
         labels = oof_df[CFG.target_cols].values
         preds = oof_df[[f"pred_{c}" for c in CFG.target_cols]].values

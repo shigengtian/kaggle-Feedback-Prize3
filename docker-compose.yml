@@ -7,9 +7,9 @@ services:
     restart: always
     working_dir: /feedback
     volumes:
-      - /home/shi/workspace/fb3:/feedback
+      - ./:/feedback
     tty: true
-    shm_size: 50gb
+    shm_size: 30gb
     deploy:
       resources:
         reservations:
