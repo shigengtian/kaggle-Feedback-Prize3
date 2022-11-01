@@ -26,6 +26,7 @@ from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 from utils import *
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # ====================================================
