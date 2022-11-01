@@ -399,6 +399,7 @@ def parse_args():
     parser.add_argument("--max_len", type=int, default=1024, required=False)
     parser.add_argument("--batch_size", type=int, default=8, required=False)
     parser.add_argument("--output_path", type=str, required=True)
+    parser.add_argument("--tokenizer", type=str, required=False)
 
     return parser.parse_args()
 
@@ -408,6 +409,7 @@ if __name__ == '__main__':
     args = parse_args()
     CFG.model= args.model
     CFG.lr = args.lr
+    CFG.tokenizer = args.tokenizer
     
     
 
@@ -438,7 +440,8 @@ if __name__ == '__main__':
     # ====================================================
     # tokenizer
     # ====================================================
-    tokenizer = AutoTokenizer.from_pretrained(CFG.model)
+    
+    tokenizer = AutoTokenizer.from_pretrained(CFG.tokenizer)
     tokenizer.save_pretrained(OUTPUT_DIR+'tokenizer/')
     CFG.tokenizer = tokenizer
 

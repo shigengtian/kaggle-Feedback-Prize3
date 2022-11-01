@@ -1,5 +1,6 @@
 wandb/
 fb3-deberta-v3-large-dropout-exp03/
+deberta*
 exp*/
 *.bin
 *.csv
