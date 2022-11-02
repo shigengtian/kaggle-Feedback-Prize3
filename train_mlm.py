@@ -31,16 +31,24 @@ class CFG:
     LR = 2e-5
     
     SEED = 0
-    TEST_SIZE = 0.25
+    TEST_SIZE = 0.2
 
 
-train_df = pd.read_csv("./feedback-prize-english-language-learning/train.csv")
+train_df = pd.read_csv("./feedback-prize-english-language-learning/train.csv")[['text_id', 'full_text']]
+train_df_2021 = pd.read_csv("./feedback-prize-english-language-learning/2021_pseduo_label.csv")
+
+print(len(train_df))
+
+train_df = pd.concat([train_df, train_df_2021])
+print(len(train_df))
+
+
 texts = train_df["full_text"].tolist()
 if CFG.DEBUG:
     texts = texts[:100]
 
 train_text_list, valid_text_list, _, _ = train_test_split(texts, texts, test_size=CFG.TEST_SIZE, random_state=CFG.SEED)
-
+print(len(train_text_list))
 
 mlm_train_json_path = f'train_mlm.json'
 mlm_valid_json_path = f'valid_mlm.json'
@@ -60,13 +68,13 @@ datasets = load_dataset(
                 'valid': str(mlm_valid_json_path)},
     )
 
-print(datasets["train"][:2])
+# print(datasets["train"][:2])
 
 
+tokenizer = AutoTokenizer.from_pretrained(CFG.MODEL_NAME, trim_offsets=False)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-tokenizer = AutoTokenizer.from_pretrained(CFG.MODEL_NAME, trim_offsets=False)
 
 tokenized_datasets = datasets.map(
     tokenize_function,
