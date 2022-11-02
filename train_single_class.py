@@ -151,7 +151,7 @@ class CustomModel(nn.Module):
         if self.cfg.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
         self.pool = MeanPooling()
-        self.fc = nn.Linear(self.config.hidden_size, 6)
+        self.fc = nn.Linear(self.config.hidden_size, 1)
         self._init_weights(self.fc)
         
     def _init_weights(self, module):
@@ -365,6 +365,7 @@ def train_loop(folds, fold):
         # scoring
         score, scores = get_score(valid_labels, predictions)
 
+
         elapsed = time.time() - start_time
 
         LOGGER.info(f'Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s')
@@ -413,7 +414,7 @@ if __name__ == '__main__':
     CFG.decoder_lr=args.lr
     CFG.tokenizer = args.tokenizer
     CFG.tokenizer = args.tokenizer
-    CFG.target_cols = args.target_cols
+    CFG.target_cols = [args.target_cols]
     
     
     OUTPUT_DIR = args.output_path
@@ -430,17 +431,17 @@ if __name__ == '__main__':
     test = pd.read_csv('./feedback-prize-english-language-learning/test.csv')
     submission = pd.read_csv('./feedback-prize-english-language-learning/sample_submission.csv')
 
-
+    
     # ====================================================
     # CV split
     # ====================================================
-    # Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-    # for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
-    #     train.loc[val_index, 'fold'] = int(n)
-    # train['fold'] = train['fold'].astype(int)
-
+    from sklearn import preprocessing
+    le = preprocessing.LabelEncoder()
+    train['cc'] = le.fit_transform(train[CFG.target_cols])
+    # print(train.head())
+    # le.fit([1, 2, 2, 6])
     Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
-    for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
+    for n, (train_index, val_index) in enumerate(Fold.split(train, train['cc'])):
         train.loc[val_index, 'fold'] = int(n)
     train['fold'] = train['fold'].astype(int)
 
