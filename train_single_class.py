@@ -57,7 +57,7 @@ class CFG:
     weight_decay=0.01
     gradient_accumulation_steps=1
     max_grad_norm=1000
-    target_cols=['cohesion', 'syntax', 'vocabulary', 'phraseology', 'grammar', 'conventions']
+    # target_cols=['cohesion', 'syntax', 'vocabulary', 'phraseology', 'grammar', 'conventions']
     seed=42
     n_fold=5
     trn_fold=[0, 1, 2, 3, 4]
@@ -400,6 +400,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=8, required=False)
     parser.add_argument("--output_path", type=str, required=True)
     parser.add_argument("--tokenizer", type=str, required=False)
+    parser.add_argument("--target_cols", type=str, required=False)
 
     return parser.parse_args()
 
@@ -411,8 +412,10 @@ if __name__ == '__main__':
     CFG.encoder_lr=args.lr
     CFG.decoder_lr=args.lr
     CFG.tokenizer = args.tokenizer
+    CFG.tokenizer = args.tokenizer
+    CFG.target_cols = args.target_cols
     
-
+    
     OUTPUT_DIR = args.output_path
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -431,7 +434,12 @@ if __name__ == '__main__':
     # ====================================================
     # CV split
     # ====================================================
-    Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
+    # Fold = MultilabelStratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
+    # for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
+    #     train.loc[val_index, 'fold'] = int(n)
+    # train['fold'] = train['fold'].astype(int)
+
+    Fold = StratifiedKFold(n_splits=CFG.n_fold, shuffle=True, random_state=CFG.seed)
     for n, (train_index, val_index) in enumerate(Fold.split(train, train[CFG.target_cols])):
         train.loc[val_index, 'fold'] = int(n)
     train['fold'] = train['fold'].astype(int)
