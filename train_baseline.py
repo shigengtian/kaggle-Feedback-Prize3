@@ -454,8 +454,8 @@ if __name__ == '__main__':
     for text in tk0:
         length = len(tokenizer(text, add_special_tokens=False)['input_ids'])
         lengths.append(length)
-    CFG.max_len = max(lengths) + 3 # cls & sep & sep
-
+    # CFG.max_len = max(lengths) + 3 # cls & sep & sep
+    CFG.max_len = min(max(lengths) + 3, 2048)
     # ====================================================
     # Start train
     # ====================================================

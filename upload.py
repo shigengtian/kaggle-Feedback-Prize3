@@ -7,7 +7,7 @@ import json
 #     Exp = "exp01"
 #     OUTPUT_DIR = "exp01"
 
-exp_no = "exp022"
+exp_no = "exp027"
 
 user_name="shigengtian"
 def dataset_create_new(dataset_name, upload_dir):
