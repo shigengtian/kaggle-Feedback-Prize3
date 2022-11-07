@@ -114,17 +114,10 @@ class CFG:
 
 
 #Unique model name
-# if len(CFG.model.split("/")) == 2:
-#     CFG.identifier = f'{CFG.str_now}-{CFG.model.split("/")[1]}'
-# else:
-#     CFG.identifier = f'{CFG.str_now}-{CFG.model}'
-    
-# print(CFG.identifier)
-
-
-# # Read train and split with MultilabelStratifiedKFold
-
-# In[4]:
+if len(CFG.model.split("/")) == 2:
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model.split("/")[1]}'
+else:
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model}'
 
 
 if CFG.train:

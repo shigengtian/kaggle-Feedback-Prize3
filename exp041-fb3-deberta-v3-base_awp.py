@@ -114,17 +114,10 @@ class CFG:
 
 
 #Unique model name
-# if len(CFG.model.split("/")) == 2:
-#     CFG.identifier = f'{CFG.str_now}-{CFG.model.split("/")[1]}'
-# else:
-#     CFG.identifier = f'{CFG.str_now}-{CFG.model}'
-    
-# print(CFG.identifier)
-
-
-# # Read train and split with MultilabelStratifiedKFold
-
-# In[4]:
+if len(CFG.model.split("/")) == 2:
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model.split("/")[1]}'
+else:
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model}'
 
 
 if CFG.train:
@@ -393,6 +386,7 @@ class AWP:
         adv_param="weight",
         adv_lr=1,
         adv_eps=0.2,
+        criterion = None,
         start_epoch=0,
         adv_step=1,
         scaler=None
@@ -407,6 +401,7 @@ class AWP:
         self.backup = {}
         self.backup_eps = {}
         self.scaler = scaler
+        self.criterion = criterion
         
     def attack_backward(self, x, y, attention_mask,epoch):
         if (self.adv_lr == 0) or (epoch < self.start_epoch):
@@ -416,8 +411,11 @@ class AWP:
         for i in range(self.adv_step):
             self._attack_step() 
             with torch.cuda.amp.autocast():
-                adv_loss, tr_logits = self.model(input_ids=x, attention_mask=attention_mask, labels=y)
+                y_preds = self.model(x)
+                adv_loss = self.criterion(y_preds,y)
                 adv_loss = adv_loss.mean()
+                # adv_loss, tr_logits = self.model(input_ids=x, attention_mask=attention_mask, labels=y)
+                # adv_loss = adv_loss.mean()
             self.optimizer.zero_grad()
             self.scaler.scale(adv_loss).backward()
             
@@ -477,6 +475,7 @@ def train_fn(fold, train_loader, model, criterion, optimizer, epoch, scheduler, 
                   optimizer, 
                   adv_lr = CFG.adv_lr, 
                   adv_eps = CFG.adv_eps, 
+                  criterion = criterion,
                   scaler = scaler)
     for step, (inputs, labels) in enumerate(train_loader):
         attention_mask = inputs['attention_mask'].to(device)
@@ -593,7 +592,7 @@ tk0 = tqdm(CFG.df_train['full_text'].fillna('').values, total = len(CFG.df_train
 for text in tk0:
     length = len(CFG.tokenizer(text, add_special_tokens = False)['input_ids'])
     lengths.append(length)
-CFG.max_len = max(lengths) + 2
+CFG.max_len = max(lengths) + 3
 LOGGER.info(f'max_len: {CFG.max_len}')
 
 

@@ -115,21 +115,14 @@ class CFG:
 
 #Unique model name
 if len(CFG.model.split("/")) == 2:
-    CFG.identifier = f'{CFG.str_now}-{CFG.model.split("/")[1]}'
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model.split("/")[1]}'
 else:
-    CFG.identifier = f'{CFG.str_now}-{CFG.model}'
-    
-print(CFG.identifier)
-
-
-# # Read train and split with MultilabelStratifiedKFold
-
-# In[4]:
+    CFG.identifier = f'{CFG.OUTPUT_DIR}/{CFG.str_now}-{CFG.model}'
 
 
 if CFG.train:
     CFG.df_train = pd.read_csv(CFG.train_file)
-    CFG.OUTPUT_DIR = f'./{CFG.identifier}/'
+    # CFG.OUTPUT_DIR = f'./{CFG.identifier}/'
     CFG.log_filename = CFG.OUTPUT_DIR + 'train'
     if CFG.offline:
         #TO DO
@@ -593,7 +586,7 @@ tk0 = tqdm(CFG.df_train['full_text'].fillna('').values, total = len(CFG.df_train
 for text in tk0:
     length = len(CFG.tokenizer(text, add_special_tokens = False)['input_ids'])
     lengths.append(length)
-CFG.max_len = max(lengths) + 2
+CFG.max_len = max(lengths) + 3
 LOGGER.info(f'max_len: {CFG.max_len}')
 
 
