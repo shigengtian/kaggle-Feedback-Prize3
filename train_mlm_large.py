@@ -39,8 +39,8 @@ train_df_2021 = pd.read_csv("./feedback-prize-english-language-learning/2021_pse
 
 print(len(train_df))
 
-train_df = pd.concat([train_df, train_df_2021])
-print(len(train_df))
+# train_df = pd.concat([train_df, train_df_2021])
+# print(len(train_df))
 
 
 texts = train_df["full_text"].tolist()
@@ -140,14 +140,14 @@ ds_config_dict = {
 }
 
 training_args = TrainingArguments(
-    output_dir="deberta-large",
+    output_dir="deberta-large-2022",
     evaluation_strategy="epoch",
     learning_rate=CFG.LR,
     weight_decay=0.01,
     save_strategy='epoch',
     per_device_train_batch_size=CFG.BS,
     num_train_epochs=CFG.N_EPOCHS,
-    run_name=f'deberta-large-{CFG.EXP_NUM}',
+    run_name=f'deberta-large-2022-{CFG.EXP_NUM}',
     logging_dir='./logs',
     lr_scheduler_type='cosine',
     warmup_ratio=0.1,
