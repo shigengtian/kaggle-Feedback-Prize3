@@ -88,7 +88,7 @@ class CFG:
     awp = False
     adv_lr = 1
     adv_eps = 0.2
-    unscale = True 
+    unscale = False
     eps = 1e-6
     betas = (0.9, 0.999)
     max_len = 512
@@ -107,7 +107,7 @@ class CFG:
     train_file = './feedback-prize-english-language-learning/train.csv'
     test_file = './feedback-prize-english-language-learning/test.csv'
     submission_file = '../input/feedback-prize-english-language-learning/sample_submission.csv'
-    OUTPUT_DIR = "exp046/"
+    OUTPUT_DIR = "exp044/"
 
 
 # In[3]:
@@ -586,7 +586,7 @@ tk0 = tqdm(CFG.df_train['full_text'].fillna('').values, total = len(CFG.df_train
 for text in tk0:
     length = len(CFG.tokenizer(text, add_special_tokens = False)['input_ids'])
     lengths.append(length)
-CFG.max_len = max(lengths) + 3
+CFG.max_len = max(lengths) + 2
 LOGGER.info(f'max_len: {CFG.max_len}')
 
 

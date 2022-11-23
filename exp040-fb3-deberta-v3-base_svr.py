@@ -294,10 +294,14 @@ CFG.max_len = max(lengths) + 3 # cls & sep & sep
 print(f"max_len: {CFG.max_len}")
 
 models = [
-    'exp040',
-    'exp041',
-    'exp042',
-    'exp043',
+#    'exp040',
+#    'exp041',
+#    'exp042',
+#    'exp043',
+    'exp050',
+    'exp051',
+    'exp052',
+    'exp053',
 ]
 
 for m in models:
