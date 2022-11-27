@@ -8,8 +8,8 @@ import json
 #     OUTPUT_DIR = "exp01"
 
 # exp_no = "exp040"
-for i in range(4):
-    exp_no = "exp0" + str(40+i)
+for i in range(1):
+    exp_no = "exp0" + str(69+i)
     print(exp_no)
     user_name="shigengtian"
     def dataset_create_new(dataset_name, upload_dir):

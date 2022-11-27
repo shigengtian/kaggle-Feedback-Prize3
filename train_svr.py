@@ -101,7 +101,22 @@ for n, (train_index, val_index) in enumerate(Fold.split(df_train, df_train[CFG.t
 df_train['fold'] = df_train['fold'].astype(int)
 print(df_train.head())
 print(df_train.columns)
+p = pd.read_csv("./feedback-prize-english-language-learning/p_feature.csv")
+p['fold'] = -1
+# print(p.head())
 
+columns = ['text_id', 'full_text', 'cohesion', 'syntax', 'vocabulary',
+       'phraseology', 'grammar', 'conventions', 'full_text_num_words',
+       'full_text_num_unique_words', 'full_text_num_chars',
+       'full_text_num_stopwords', 'full_text_num_punctuations',
+       'full_text_num_words_upper', 'full_text_num_words_title',
+       'full_text_mean_word_len', 'full_text_num_paragraphs',
+       'full_text_num_contractions', 'full_text_polarity',
+       'full_text_subjectivity', 'full_text_nn_count', 'full_text_pr_count',
+       'full_text_vb_count', 'full_text_jj_count', 'full_text_uh_count',
+       'full_text_cd_count', 'fold']
+
+p = p[columns]
 feature_column = ['full_text_num_words',
                   'full_text_num_unique_words', 'full_text_num_chars',
                   'full_text_num_stopwords', 'full_text_num_punctuations',
@@ -112,6 +127,10 @@ feature_column = ['full_text_num_words',
                   'full_text_vb_count', 'full_text_jj_count', 'full_text_uh_count',
                   'full_text_cd_count']
 
+
+print(df_train.head())
+print(p.head())
+df_train = pd.concat([df_train, p]).reset_index(drop=True)
 
 def comp_score(y_true, y_pred):
     rmse_scores = []
@@ -124,10 +143,10 @@ def comp_score(y_true, y_pred):
 def get_embeddings(fold):
 
     models = [
-        'exp040',
-        'exp041',
-        'exp042',
-        'exp043',
+        'exp066',
+        # 'exp041',
+        # 'exp042',
+        # 'exp043',
     ]
     train_embeddings = []
     valid_embeddings = []
@@ -194,7 +213,7 @@ for fold in range(5):
     # df_train = df_train.reset_index(drop=True)
     train_index = df_train[df_train['fold'] != fold].index
     valid_index = df_train[df_train['fold'] == fold].index
-
+    # print(len(train_index))
     train_folds = df_train.loc[train_index]
     valid_folds = df_train.loc[valid_index]
     train_labels = train_folds[CFG.target_cols].values

@@ -49,7 +49,7 @@ class CFG:
     debug=False
     apex=True
     print_freq=20
-    num_workers=4
+    num_workers=12
     model="microsoft/deberta-v3-base"
     gradient_checkpointing=True
     scheduler='cosine' # ['linear', 'cosine']
@@ -91,6 +91,10 @@ seed_everything(seed=42)
 train_file = './feedback-prize-english-language-learning/train.csv'
 df_train = pd.read_csv(train_file)
 
+df_p = pd.read_csv('feedback-prize-english-language-learning/p.csv')
+df_p = df_p[['text_id','full_text','cohesion','syntax','vocabulary','phraseology','grammar','conventions']]
+df_p['fold']=-1
+
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold    
 Fold = MultilabelStratifiedKFold(n_splits = 5, shuffle = True, random_state = seed)
 for n, (train_index, val_index) in enumerate(Fold.split(df_train, df_train[CFG.target_cols])):
@@ -98,7 +102,7 @@ for n, (train_index, val_index) in enumerate(Fold.split(df_train, df_train[CFG.t
 df_train['fold'] = df_train['fold'].astype(int)
 print(df_train.head())
 
-
+df_train = pd.concat([df_train, df_p])
 # ====================================================
 # Model
 # ====================================================
@@ -281,7 +285,7 @@ def valid_fn(valid_loader, model):
     return predictions
 
 
-CFG.path = 'exp040/'
+CFG.path = 'exp060/'
 CFG.config_path = CFG.path+'config/config.json'
 print(CFG.config_path)
 CFG.tokenizer = AutoTokenizer.from_pretrained(CFG.path+'tokenizer/')
@@ -290,22 +294,20 @@ tk0 = tqdm(df_train['full_text'].fillna("").values, total=len(df_train))
 for text in tk0:
     length = len(CFG.tokenizer(text, add_special_tokens=False)['input_ids'])
     lengths.append(length)
-CFG.max_len = max(lengths) + 3 # cls & sep & sep
+CFG.max_len = max(lengths) + 2 # cls & sep & sep
 print(f"max_len: {CFG.max_len}")
 
 models = [
-#    'exp040',
-#    'exp041',
-#    'exp042',
-#    'exp043',
-    'exp050',
-    'exp051',
-    'exp052',
-    'exp053',
+    # 'exp060',
+    'exp066',
 ]
 
+
 for m in models:
-    for fold in range(5):
+    fold_n = 5
+    # if m == "exp066":
+    #     fold_n = 5    
+    for fold in range(fold_n):
         train_folds = df_train[df_train['fold'] != fold].reset_index(drop=True)
         valid_folds = df_train[df_train['fold'] == fold].reset_index(drop=True)
         train_labels = train_folds[CFG.target_cols].values

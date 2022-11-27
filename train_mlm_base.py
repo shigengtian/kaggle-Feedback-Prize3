@@ -35,12 +35,12 @@ class CFG:
 
 
 train_df = pd.read_csv("./feedback-prize-english-language-learning/train.csv")[['text_id', 'full_text']]
-train_df_2021 = pd.read_csv("./feedback-prize-english-language-learning/2021_pseduo_label.csv")
+train_df_2021 = pd.read_csv("./feedback-prize-english-language-learning/p.csv")[['text_id', 'full_text']]
 
 print(len(train_df))
 
-# train_df = pd.concat([train_df, train_df_2021])
-# print(len(train_df))
+train_df = pd.concat([train_df, train_df_2021])
+print(len(train_df))
 
 
 texts = train_df["full_text"].tolist()
