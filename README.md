@@ -1,4 +1,4 @@
 # fb3
 Feedback Prize - English Language Learning
-- lb 173/2,740 teams
+- lb 162/2,654 teams
 - bronze medal
